@@ -10,9 +10,9 @@
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import Busboy from "busboy";
-import { supabaseAdmin } from "./lib/supabase-admin";
-import { validateZip } from "../src/services/validation.service";
-import { uploadToS3 } from "../src/lib/s3.server";
+import { supabaseAdmin } from "./lib/supabase-admin.js";
+import { validateZip } from "../src/services/validation.service.js";
+import { uploadToS3 } from "../src/lib/s3.server.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",

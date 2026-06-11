@@ -5,8 +5,8 @@
  * The frontend polls this endpoint to get live updates on processing progress.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabaseAdmin } from "./lib/supabase-admin";
-import { discoverAndPersistResults } from "../src/services/result-discovery.service";
+import { supabaseAdmin } from "./lib/supabase-admin.js";
+import { discoverAndPersistResults } from "../src/services/result-discovery.service.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",

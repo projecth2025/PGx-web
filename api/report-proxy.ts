@@ -5,8 +5,8 @@
  * it to the frontend with appropriate CSP headers for safe rendering.
  */
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabaseAdmin } from "./lib/supabase-admin";
-import { getSignedUrl } from "../src/lib/s3.server";
+import { supabaseAdmin } from "./lib/supabase-admin.js";
+import { getSignedUrl } from "../src/lib/s3.server.js";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
