@@ -1,8 +1,8 @@
 {
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/api/process-batch", "destination": "/api/process-batch" },
+    { "source": "/api/check-batch-results", "destination": "/api/check-batch-results" },
+    { "source": "/api/report-proxy", "destination": "/api/report-proxy" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
