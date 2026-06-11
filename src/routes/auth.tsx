@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ShieldCheck, Lock, Server } from "lucide-react";
+import { ShieldCheck, Lock, Server, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -18,6 +18,7 @@ function AuthPage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("login");
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
 
   // Login fields
   const [email, setEmail] = useState("");
@@ -32,21 +33,50 @@ function AuthPage() {
 
   const passwordsMismatch = suConfirm.length > 0 && suPassword !== suConfirm;
 
+  // Check for existing session or OAuth callback
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) return;
-      // Check profile completeness
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("full_name")
-        .eq("id", session.user.id)
-        .maybeSingle();
-      if (profile?.full_name) {
-        navigate({ to: "/upload", replace: true });
-      } else {
-        navigate({ to: "/complete-profile", replace: true });
+    const checkSession = async () => {
+      // Wait a bit for Supabase to process the OAuth callback hash
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        // Check profile completeness
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", session.user.id)
+          .maybeSingle();
+        if (profile?.full_name) {
+          navigate({ to: "/upload", replace: true });
+        } else {
+          navigate({ to: "/complete-profile", replace: true });
+        }
+        return;
+      }
+      setCheckingSession(false);
+    };
+    
+    checkSession();
+    
+    // Also listen for auth state changes (handles OAuth callback)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" && session) {
+        // Check profile completeness
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", session.user.id)
+          .maybeSingle();
+        if (profile?.full_name) {
+          navigate({ to: "/upload", replace: true });
+        } else {
+          navigate({ to: "/complete-profile", replace: true });
+        }
       }
     });
+    
+    return () => subscription.unsubscribe();
   }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -103,6 +133,18 @@ function AuthPage() {
       toast.error(error.message);
     }
   };
+
+  // Show loading state while checking session (OAuth callback handling)
+  if (checkingSession) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="text-center">
+          <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+          <p className="mt-4 text-sm text-muted-foreground">Completing sign in...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
