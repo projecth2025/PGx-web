@@ -128,7 +128,7 @@ export async function discoverAndPersistResults(
   // ------------------------------------------------------------------
   // 3. List all S3 objects under users/{userId}/{batchId}/
   // ------------------------------------------------------------------
-  const { listObjects } = await import("@/lib/s3.server");
+  const { listObjects } = await import("../lib/s3.server.js");
   const prefix = `users/${userId}/${batchId}/`;
   const objects = await listObjects(prefix);
 
