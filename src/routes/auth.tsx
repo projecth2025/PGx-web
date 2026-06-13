@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ShieldCheck, Lock, Server, Loader2 } from "lucide-react";
+import { ShieldCheck, Lock, Server, Loader2, Mail } from "lucide-react";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -28,20 +28,21 @@ function AuthPage() {
   const [fullName, setFullName] = useState("");
   const [org, setOrg] = useState("");
   const [suEmail, setSuEmail] = useState("");
-  const [suPassword, setSuPassword] = useState("");
-  const [suConfirm, setSuConfirm] = useState("");
 
-  const passwordsMismatch = suConfirm.length > 0 && suPassword !== suConfirm;
+  // Signup step: "info" | "verify" | "password"
+  const [signupStep, setSignupStep] = useState<"info" | "verify" | "password">("info");
+  const [setupPassword, setSetupPassword] = useState("");
+  const [setupConfirm, setSetupConfirm] = useState("");
+  const passwordHandled = useRef(false);
+
+  const passwordsMismatch = setupConfirm.length > 0 && setupPassword !== setupConfirm;
 
   // Check for existing session or OAuth callback
   useEffect(() => {
     const checkSession = async () => {
-      // Wait a bit for Supabase to process the OAuth callback hash
       await new Promise((resolve) => setTimeout(resolve, 100));
-      
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        // Check profile completeness
         const { data: profile } = await supabase
           .from("profiles")
           .select("full_name")
@@ -56,13 +57,13 @@ function AuthPage() {
       }
       setCheckingSession(false);
     };
-    
     checkSession();
-    
-    // Also listen for auth state changes (handles OAuth callback)
+
+    // Listen for auth state changes (OAuth callback + email verification)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "SIGNED_IN" && session) {
-        // Check profile completeness
+        // Don't redirect if we're in the signup verification flow
+        if (signupStep === "verify") return;
         const { data: profile } = await supabase
           .from("profiles")
           .select("full_name")
@@ -73,11 +74,17 @@ function AuthPage() {
         } else {
           navigate({ to: "/complete-profile", replace: true });
         }
+        return;
+      }
+
+      // Email verification detected
+      if (event === "USER_UPDATED" && session?.user?.email_confirmed_at && !passwordHandled.current) {
+        passwordHandled.current = true;
+        setSignupStep("password");
       }
     });
-    
     return () => subscription.unsubscribe();
-  }, [navigate]);
+  }, [navigate, signupStep]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,31 +99,82 @@ function AuthPage() {
     navigate({ to: "/upload", replace: true });
   };
 
+  // Step 1 → Step 2: Create user + send verification email
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (suPassword.length < 8) {
-      toast.error("Password must be at least 8 characters.");
-      return;
-    }
-    if (suPassword !== suConfirm) {
-      toast.error("Passwords do not match.");
-      return;
-    }
     setLoading(true);
+
+    // Generate a secure random temp password (user will set real one after verification)
+    const tempPassword = crypto.randomUUID() + "-T!";
+
     const { error } = await supabase.auth.signUp({
       email: suEmail,
-      password: suPassword,
+      password: tempPassword,
       options: {
-        emailRedirectTo: window.location.origin,
-        data: { full_name: fullName, organization_name: org },
+        emailRedirectTo: `${window.location.origin}/auth`,
+        data: { full_name: fullName, organization_name: org || "" },
       },
     });
+
     setLoading(false);
     if (error) {
       toast.error(error.message);
       return;
     }
-    toast.success("Account created. Signing you in…");
+
+    // Store signup info for the password-setup step
+    try {
+      sessionStorage.setItem("pgx_signup", JSON.stringify({ fullName, org, email: suEmail }));
+    } catch { /* ignore */ }
+
+    setSignupStep("verify");
+  };
+
+  // Step 3 → Step 4: User sets their real password after email verification
+  const handleSetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (setupPassword.length < 8) {
+      toast.error("Password must be at least 8 characters.");
+      return;
+    }
+    if (setupPassword !== setupConfirm) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+    setLoading(true);
+
+    // Update the user's password
+    const { error: updateErr } = await supabase.auth.updateUser({ password: setupPassword });
+    if (updateErr) {
+      toast.error(updateErr.message);
+      setLoading(false);
+      return;
+    }
+
+    // Retrieve signup info and save profile
+    let signupInfo = { fullName: "", org: "" };
+    try {
+      const stored = sessionStorage.getItem("pgx_signup");
+      if (stored) {
+        signupInfo = JSON.parse(stored);
+        sessionStorage.removeItem("pgx_signup");
+      }
+    } catch { /* ignore */ }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from("profiles").upsert(
+        {
+          id: user.id,
+          full_name: signupInfo.fullName || user.user_metadata?.full_name || "",
+          organization_name: signupInfo.org || user.user_metadata?.organization_name || "",
+        },
+        { onConflict: "id" },
+      );
+    }
+
+    setLoading(false);
+    toast.success("Account created successfully!");
     navigate({ to: "/upload", replace: true });
   };
 
@@ -124,14 +182,10 @@ function AuthPage() {
     setLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth`,
-      },
+      options: { redirectTo: `${window.location.origin}/auth` },
     });
     setLoading(false);
-    if (error) {
-      toast.error(error.message);
-    }
+    if (error) toast.error(error.message);
   };
 
   // Show loading state while checking session (OAuth callback handling)
@@ -186,138 +240,190 @@ function AuthPage() {
           <div className="mb-8 lg:hidden">
             <Logo />
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Access your workspace
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Sign in with your institutional account to continue.
-          </p>
 
-          <Tabs value={tab} onValueChange={setTab} className="mt-8">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="login">Sign In</TabsTrigger>
-              <TabsTrigger value="signup">Create Account</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="login" className="mt-6">
-              <GoogleButton onClick={handleGoogleAuth} disabled={loading} />
-              <OrSeparator />
-              <form onSubmit={handleLogin} className="space-y-4">
+          {signupStep === "password" ? (
+            /* ── Step 3: Password Setup (after email verification) ── */
+            <>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                Complete Account Setup
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Your email is verified. Set your password to finish creating your account.
+              </p>
+              <form onSubmit={handleSetPassword} className="mt-8 space-y-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="email">Email address</Label>
+                  <Label htmlFor="setupPassword">Set Password</Label>
                   <Input
-                    id="email"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@institution.org"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="password">Password</Label>
-                    <Link
-                      to="/forgot-password"
-                      className="text-xs font-medium text-primary hover:underline"
-                    >
-                      Forgot password?
-                    </Link>
-                  </div>
-                  <Input
-                    id="password"
-                    type="password"
-                    autoComplete="current-password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "Signing in…" : "Sign In"}
-                </Button>
-              </form>
-            </TabsContent>
-
-            <TabsContent value="signup" className="mt-6">
-              <GoogleButton onClick={handleGoogleAuth} disabled={loading} />
-              <OrSeparator />
-              <form onSubmit={handleSignup} className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="fullName">Full name</Label>
-                  <Input
-                    id="fullName"
-                    required
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Dr. Jane Doe"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="org">Organization / Laboratory</Label>
-                  <Input
-                    id="org"
-                    required
-                    value={org}
-                    onChange={(e) => setOrg(e.target.value)}
-                    placeholder="City Hospital Genomics Lab"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="suEmail">Email address</Label>
-                  <Input
-                    id="suEmail"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    value={suEmail}
-                    onChange={(e) => setSuEmail(e.target.value)}
-                    placeholder="name@institution.org"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="suPassword">Password</Label>
-                  <Input
-                    id="suPassword"
+                    id="setupPassword"
                     type="password"
                     autoComplete="new-password"
                     required
-                    value={suPassword}
-                    onChange={(e) => setSuPassword(e.target.value)}
+                    value={setupPassword}
+                    onChange={(e) => setSetupPassword(e.target.value)}
                     placeholder="Minimum 8 characters"
+                    autoFocus
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="suConfirm">Confirm password</Label>
+                  <Label htmlFor="setupConfirm">Confirm Password</Label>
                   <Input
-                    id="suConfirm"
+                    id="setupConfirm"
                     type="password"
                     autoComplete="new-password"
                     required
-                    value={suConfirm}
-                    onChange={(e) => setSuConfirm(e.target.value)}
+                    value={setupConfirm}
+                    onChange={(e) => setSetupConfirm(e.target.value)}
                     placeholder="Re-enter your password"
                     aria-invalid={passwordsMismatch}
                   />
                   {passwordsMismatch ? (
-                    <p className="text-xs font-medium text-destructive">
-                      Passwords do not match.
-                    </p>
+                    <p className="text-xs font-medium text-destructive">Passwords do not match.</p>
                   ) : null}
                 </div>
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={loading || passwordsMismatch || !suPassword || !suConfirm}
+                  disabled={loading || passwordsMismatch || !setupPassword || !setupConfirm}
                 >
                   {loading ? "Creating account…" : "Create Account"}
                 </Button>
               </form>
-            </TabsContent>
-          </Tabs>
+            </>
+          ) : (
+            /* ── Steps 1 & 2: Login/Signup tabs ── */
+            <>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                Access your workspace
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Sign in with your institutional account to continue.
+              </p>
+
+              <Tabs value={tab} onValueChange={setTab} className="mt-8">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="login">Sign In</TabsTrigger>
+                  <TabsTrigger value="signup">Create Account</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="login" className="mt-6">
+                  <GoogleButton onClick={handleGoogleAuth} disabled={loading} />
+                  <OrSeparator />
+                  <form onSubmit={handleLogin} className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="email">Email address</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        autoComplete="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="name@institution.org"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="password">Password</Label>
+                        <Link
+                          to="/forgot-password"
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          Forgot password?
+                        </Link>
+                      </div>
+                      <Input
+                        id="password"
+                        type="password"
+                        autoComplete="current-password"
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                      />
+                    </div>
+                    <Button type="submit" className="w-full" disabled={loading}>
+                      {loading ? "Signing in…" : "Sign In"}
+                    </Button>
+                  </form>
+                </TabsContent>
+
+                <TabsContent value="signup" className="mt-6">
+                  <GoogleButton onClick={handleGoogleAuth} disabled={loading} />
+                  <OrSeparator />
+                  <form onSubmit={handleSignup} className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="fullName">Full name</Label>
+                      <Input
+                        id="fullName"
+                        required
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder="Dr. Jane Doe"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="org">
+                        Organization / Laboratory{" "}
+                        <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+                      </Label>
+                      <Input
+                        id="org"
+                        value={org}
+                        onChange={(e) => setOrg(e.target.value)}
+                        placeholder="City Hospital Genomics Lab"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="suEmail">Email address</Label>
+                      <Input
+                        id="suEmail"
+                        type="email"
+                        autoComplete="email"
+                        required
+                        value={suEmail}
+                        onChange={(e) => setSuEmail(e.target.value)}
+                        placeholder="name@institution.org"
+                      />
+                    </div>
+                    <Button
+                      type="submit"
+                      className="w-full"
+                      disabled={loading || !fullName || !suEmail}
+                    >
+                      {loading ? "Sending verification…" : "Create Account"}
+                    </Button>
+                  </form>
+                </TabsContent>
+              </Tabs>
+            </>
+          )}
         </div>
       </div>
+
+      {/* ── Email Verification Modal ── */}
+      {signupStep === "verify" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="mx-4 w-full max-w-md rounded-lg border border-border bg-card p-8 shadow-xl">
+            <div className="flex flex-col items-center text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+                <Mail className="h-7 w-7 text-primary" />
+              </div>
+              <h2 className="mt-5 text-xl font-semibold text-foreground">
+                Check Your Email
+              </h2>
+              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                We have sent a confirmation email to{" "}
+                <span className="font-medium text-foreground">{suEmail}</span>.
+                Please open your inbox and click the verification link to continue
+                creating your account.
+              </p>
+              <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                Waiting for verification…
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

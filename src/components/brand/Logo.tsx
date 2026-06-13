@@ -6,7 +6,7 @@ interface LogoProps {
   showWordmark?: boolean;
 }
 
-/** GenomeLab brand mark — a clinical double-helix glyph. */
+/** PGX brand mark — a clinical double-helix glyph. */
 export function Logo({ className, variant = "dark", showWordmark = true }: LogoProps) {
   const markColor = variant === "light" ? "text-sidebar-primary" : "text-primary";
   const textColor = variant === "light" ? "text-sidebar-foreground" : "text-foreground";
@@ -31,7 +31,7 @@ export function Logo({ className, variant = "dark", showWordmark = true }: LogoP
       {showWordmark ? (
         <div className="leading-none">
           <span className={cn("text-base font-semibold tracking-tight", textColor)}>
-            Genome<span className={markColor}>Lab</span>
+            PG<span className={cn(markColor, "text-xs uppercase")}>x</span>
           </span>
         </div>
       ) : null}

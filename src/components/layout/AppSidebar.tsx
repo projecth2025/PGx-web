@@ -43,7 +43,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       <div className="border-t border-sidebar-border p-3">
         <p className="px-3 text-[11px] text-sidebar-foreground/40">
-          GenomeLab • Genomic Processing
+          PGX • Genomic Processing
         </p>
       </div>
     </div>
