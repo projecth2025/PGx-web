@@ -80,14 +80,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "GenomeLab — Genomic Report Processing Platform" },
+      { title: "PGX — Genomic Report Processing Platform" },
       {
         name: "description",
         content:
           "Secure platform for medical and genomic laboratories to upload VCF files, process them, and manage generated reports.",
       },
-      { name: "author", content: "GenomeLab" },
-      { property: "og:title", content: "GenomeLab — Genomic Report Processing Platform" },
+      { name: "author", content: "PGX" },
+      { property: "og:title", content: "PGX — Genomic Report Processing Platform" },
       {
         property: "og:description",
         content:

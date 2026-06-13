@@ -5,7 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * GenomeLab — clinical, enterprise design system.
+ * PGX — clinical, enterprise design system.
  * Blue + white + muted gray/cyan. Sharp, stable, trustworthy.
  * All colors in oklch. Use semantic tokens only in components.
  */

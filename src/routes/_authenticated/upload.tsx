@@ -334,7 +334,7 @@ function UploadPage() {
               <Label htmlFor="assembly">Genome Assembly</Label>
               <Select value={assembly} onValueChange={setAssembly} disabled={busy}>
                 <SelectTrigger id="assembly">
-                  <SelectValue placeholder="Select assembly\u2026" />
+                  <SelectValue placeholder="Select assembly" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="hg19">hg19</SelectItem>
